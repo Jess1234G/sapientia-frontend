@@ -21,6 +21,141 @@ import { FiMenu } from 'react-icons/fi';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+/*
+ * ============================================================
+ * ADJUNTOS — Tipos y límites (espejo del backend)
+ * ============================================================
+ *
+ * El backend (POST /api/v1/attachments) solo acepta:
+ *   image/png, image/jpeg, image/webp, application/pdf, text/plain
+ *
+ * Límites:
+ *   imágenes  -> 10 MB
+ *   documentos -> 20 MB
+ *
+ * El backend sigue siendo la autoridad final; estos valores
+ * solo sirven para mejorar la UX (validación ligera en cliente).
+ */
+const ALLOWED_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'application/pdf',
+  'text/plain',
+]);
+
+const IMAGE_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+]);
+
+const ALLOWED_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.pdf',
+  '.txt',
+]);
+
+const EXTENSION_TO_MIME = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+};
+
+const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
+const MAX_DOCUMENT_SIZE_BYTES = 20 * 1024 * 1024;
+
+/**
+ * Convierte una respuesta de error de la API en un mensaje legible.
+ */
+async function describeApiError(response) {
+  let detail = '';
+
+  try {
+    const text = await response.text();
+
+    if (text) {
+      try {
+        const parsed = JSON.parse(text);
+        detail = parsed?.detail || parsed?.message || '';
+      } catch {
+        detail = text;
+      }
+    }
+  } catch {
+    // Conservamos el estado HTTP como única fuente.
+  }
+
+  switch (response.status) {
+    case 400:
+      return `Archivo no válido${detail ? `: ${detail}` : '.'}`;
+    case 413:
+      return 'El archivo supera el tamaño máximo permitido.';
+    case 401:
+      return 'Sesión expirada. Vuelve a iniciar sesión.';
+    case 500:
+      return 'Error del servidor al subir el archivo.';
+    default:
+      return `No se pudo subir el archivo (HTTP ${response.status}).`;
+  }
+}
+
+/**
+ * Sube un único archivo a POST /api/v1/attachments.
+ */
+async function uploadAttachmentFile(file, idToken) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/attachments`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: formData,
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await describeApiError(response));
+  }
+
+  const data = await response.json();
+  return data.attachment_id;
+}
+
+/**
+ * Sube los adjuntos de forma secuencial, conservando el orden
+ * seleccionado por el usuario, y devuelve sus attachment_id.
+ */
+async function uploadAttachments(attachmentsList, idToken) {
+  const ids = [];
+
+  for (const attachment of attachmentsList) {
+    try {
+      const attachmentId = await uploadAttachmentFile(
+        attachment.file,
+        idToken
+      );
+      ids.push(attachmentId);
+    } catch (error) {
+      throw new Error(
+        `No se pudo subir "${attachment.file.name}": ${error.message}`
+      );
+    }
+  }
+
+  return ids;
+}
+
 /**
  * Procesa una respuesta Server-Sent Events obtenida mediante fetch().
  *
@@ -178,7 +313,8 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
 
   const [message, setMessage] = useState('');
-  const [image, setImage] = useState(null);
+  const [attachments, setAttachments] = useState([]);
+  const [attachmentError, setAttachmentError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const [chatHistory, setChatHistory] = useState([]);
@@ -191,6 +327,7 @@ export default function App() {
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
   const chatEndRef = useRef(null);
+  const attachmentsRef = useRef([]);
 
   const activeChat = useMemo(
     () =>
@@ -537,6 +674,20 @@ export default function App() {
     });
   }, [chatHistory, loading]);
 
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
+  useEffect(() => {
+    return () => {
+      attachmentsRef.current.forEach((item) => {
+        if (item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl);
+        }
+      });
+    };
+  }, []);
+
   const login = async () => {
     try {
       await signInWithPopup(
@@ -565,15 +716,97 @@ export default function App() {
     }
   };
 
-  const handleImageChange = (event) => {
-    const selectedFile =
-      event.target.files?.[0];
+  const handleFilesChange = (event) => {
+    const files = Array.from(
+      event.target.files || []
+    );
 
-    if (!selectedFile) {
+    event.target.value = '';
+
+    if (files.length === 0) {
       return;
     }
 
-    setImage(selectedFile);
+    const accepted = [];
+    const rejected = [];
+
+    for (const file of files) {
+      const name = file.name || '';
+
+      const ext = name.includes('.')
+        ? `.${name
+            .slice(name.lastIndexOf('.') + 1)
+            .toLowerCase()}`
+        : '';
+
+      let mime = (file.type || '').toLowerCase();
+
+      if (!mime && ext && EXTENSION_TO_MIME[ext]) {
+        mime = EXTENSION_TO_MIME[ext];
+      }
+
+      if (!ALLOWED_MIME_TYPES.has(mime)) {
+        rejected.push(`${name}: tipo no permitido.`);
+        continue;
+      }
+
+      if (ext && !ALLOWED_EXTENSIONS.has(ext)) {
+        rejected.push(`${name}: extensión no permitida.`);
+        continue;
+      }
+
+      const isImage = IMAGE_MIME_TYPES.has(mime);
+      const maxSize = isImage
+        ? MAX_IMAGE_SIZE_BYTES
+        : MAX_DOCUMENT_SIZE_BYTES;
+
+      if (file.size > maxSize) {
+        rejected.push(
+          `${name}: supera el límite de ${
+            maxSize / (1024 * 1024)
+          } MB.`
+        );
+        continue;
+      }
+
+      accepted.push({
+        id: `${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2, 9)}`,
+        file,
+        previewUrl: isImage
+          ? URL.createObjectURL(file)
+          : null,
+        kind: isImage ? 'image' : 'document',
+      });
+    }
+
+    if (rejected.length > 0) {
+      setAttachmentError(rejected.join(' '));
+    } else {
+      setAttachmentError('');
+    }
+
+    if (accepted.length > 0) {
+      setAttachments((prev) => [
+        ...prev,
+        ...accepted,
+      ]);
+    }
+  };
+
+  const removeAttachment = (id) => {
+    const target = attachments.find(
+      (item) => item.id === id
+    );
+
+    if (target?.previewUrl) {
+      URL.revokeObjectURL(target.previewUrl);
+    }
+
+    setAttachments((prev) =>
+      prev.filter((item) => item.id !== id)
+    );
   };
 
   const handleShare = async () => {
@@ -595,7 +828,14 @@ export default function App() {
 
   const resetInput = () => {
     setMessage('');
-    setImage(null);
+
+    attachmentsRef.current.forEach((item) => {
+      if (item.previewUrl) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+    });
+
+    setAttachments([]);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -650,7 +890,7 @@ export default function App() {
   const sendRequest = async () => {
     const pregunta = message.trim();
 
-    if (!pregunta && !image) {
+    if (!pregunta && attachments.length === 0) {
       return;
     }
 
@@ -694,11 +934,26 @@ export default function App() {
         (chat) => chat.id === targetChatId
       ) || null;
 
+    /*
+     * Snapshot de los adjuntos ANTES de cualquier reset. Los
+     * objetos File sobreviven aunque el estado local se limpie
+     * más adelante.
+     */
+    const selectedAttachments = attachments;
+
+    const firstImage =
+      selectedAttachments.find(
+        (item) => item.kind === 'image'
+      ) || null;
+
     const userMessage = {
       id: `${Date.now()}-user`,
       type: 'user',
       content:
-        pregunta || '(imagen adjunta)',
+        pregunta ||
+        (firstImage
+          ? '(imagen adjunta)'
+          : '(archivo adjunto)'),
     };
 
     const nextMessages = [
@@ -706,37 +961,32 @@ export default function App() {
       userMessage,
     ];
 
-    setChatHistory(nextMessages);
-
-    setChats((prev) =>
-      prev.map((chat) =>
-        chat.id === targetChatId
-          ? {
-              ...chat,
-              messages: nextMessages,
-              timestamp: Date.now(),
-              title:
-                chat.title === 'Nuevo chat' &&
-                pregunta
-                  ? pregunta.slice(0, 42)
-                  : chat.title,
-            }
-          : chat
-      )
-    );
-
-    const hasImage = Boolean(image);
-    const selectedImage = image;
-
     setLoading(true);
-    resetInput();
 
     const requestStart =
       performance.now();
 
+    let uploadsDone = false;
+
     try {
       const idToken =
         await user.getIdToken();
+
+      // 1) Subir adjuntos de forma secuencial (conserva el orden).
+      let uploadedAttachmentIds = [];
+
+      if (selectedAttachments.length > 0) {
+        uploadedAttachmentIds = await uploadAttachments(
+          selectedAttachments,
+          idToken
+        );
+      }
+
+      uploadsDone = true;
+
+      // 2) Limpiar el compositor tras una subida exitosa.
+      resetInput();
+      setAttachmentError('');
 
       /*
        * ============================================================
@@ -750,12 +1000,12 @@ export default function App() {
 
       let visionText = '';
 
-      if (hasImage) {
+      if (firstImage) {
         const formData = new FormData();
 
         formData.append(
           'image',
-          selectedImage
+          firstImage.file
         );
 
         const visionResponse = await axios.post(
@@ -802,6 +1052,26 @@ export default function App() {
           .join('\n\n');
       }
 
+      // 3) Añadir el mensaje del usuario al chat (tras subida + visión).
+      setChatHistory(nextMessages);
+
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.id === targetChatId
+            ? {
+                ...chat,
+                messages: nextMessages,
+                timestamp: Date.now(),
+                title:
+                  chat.title === 'Nuevo chat' &&
+                  pregunta
+                    ? pregunta.slice(0, 42)
+                    : chat.title,
+              }
+            : chat
+        )
+      );
+
       /*
        * ============================================================
        * CHAT MODERNO — SSE
@@ -815,13 +1085,13 @@ export default function App() {
       const payload = {
         message:
           pregunta ||
-          (hasImage
+          (firstImage
             ? 'Analiza esta imagen y explícame lo que contiene.'
-            : ''),
+            : 'He adjuntado un archivo.'),
         conversation_id:
           conversationId,
         vision_text: visionText,
-        attachment_ids: [],
+        attachment_ids: uploadedAttachmentIds,
       };
 
       const response = await fetch(
@@ -1147,6 +1417,19 @@ export default function App() {
         error
       );
 
+      /*
+       * Si la subida de adjuntos falló, NO enviamos el mensaje al
+       * chat. Conservamos los archivos en el compositor y mostramos
+       * el error inline para que el usuario pueda reintentar.
+       */
+      if (!uploadsDone) {
+        setAttachmentError(
+          error?.message ||
+            'No se pudo subir el archivo.'
+        );
+        return;
+      }
+
       const errorContent =
         error?.response?.data?.detail ||
         error?.message ||
@@ -1208,7 +1491,8 @@ export default function App() {
   const editUserMessage = (content) => {
     if (
       !content ||
-      content === '(imagen adjunta)'
+      content === '(imagen adjunta)' ||
+      content === '(archivo adjunto)'
     ) {
       return;
     }
@@ -1359,11 +1643,11 @@ export default function App() {
             onKeyDown={handleKeyDown}
             onInput={autoResize}
             loading={loading || historyLoading}
-            image={image}
+            attachments={attachments}
+            attachmentError={attachmentError}
+            onRemoveAttachment={removeAttachment}
             fileInputRef={fileInputRef}
-            onImageChange={
-              handleImageChange
-            }
+            onFilesChange={handleFilesChange}
             textareaRef={textareaRef}
           />
         </section>

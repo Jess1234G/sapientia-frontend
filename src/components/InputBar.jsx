@@ -2,6 +2,7 @@
 
 import { FiCpu, FiSend } from 'react-icons/fi';
 import AttachmentButton from './AttachmentButton';
+import AttachmentPreview from './AttachmentPreview';
 
 export default function InputBar({
   value,
@@ -10,17 +11,33 @@ export default function InputBar({
   onKeyDown,
   onInput,
   loading,
-  image,
+  attachments,
+  attachmentError,
+  onRemoveAttachment,
   fileInputRef,
-  onImageChange,
+  onFilesChange,
   textareaRef,
 }) {
+  const hasAttachments = attachments.length > 0;
+
   const isDisabled =
-    loading || (!value.trim() && !image);
+    loading || (!value.trim() && !hasAttachments);
 
   return (
     <div className="input-area">
       <div className="input-wrapper">
+        <AttachmentPreview
+          attachments={attachments}
+          onRemove={onRemoveAttachment}
+          disabled={loading}
+        />
+
+        {attachmentError && (
+          <p className="attachment-error" role="alert">
+            {attachmentError}
+          </p>
+        )}
+
         <textarea
           ref={textareaRef}
           value={value}
@@ -53,8 +70,8 @@ export default function InputBar({
 
             <AttachmentButton
               inputRef={fileInputRef}
-              onChange={onImageChange}
-              selectedFile={image}
+              onChange={onFilesChange}
+              hasAttachments={hasAttachments}
             />
           </div>
 

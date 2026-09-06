@@ -2,10 +2,13 @@
 
 import { FiPaperclip } from 'react-icons/fi';
 
+const ACCEPT_TYPES =
+  'image/png,image/jpeg,image/webp,application/pdf,text/plain,.png,.jpg,.jpeg,.webp,.pdf,.txt';
+
 export default function AttachmentButton({
   inputRef,
   onChange,
-  selectedFile,
+  hasAttachments,
 }) {
   const handleClick = () => {
     inputRef.current?.click();
@@ -16,7 +19,8 @@ export default function AttachmentButton({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept={ACCEPT_TYPES}
+        multiple
         onChange={onChange}
         className="hidden"
       />
@@ -26,14 +30,14 @@ export default function AttachmentButton({
         onClick={handleClick}
         className="image-button"
         title={
-          selectedFile
-            ? selectedFile.name
-            : 'Adjuntar imagen'
+          hasAttachments
+            ? 'Añadir más archivos'
+            : 'Adjuntar archivos'
         }
         aria-label={
-          selectedFile
-            ? selectedFile.name
-            : 'Adjuntar imagen'
+          hasAttachments
+            ? 'Añadir más archivos'
+            : 'Adjuntar archivos'
         }
       >
         <FiPaperclip
@@ -42,11 +46,11 @@ export default function AttachmentButton({
         />
       </button>
 
-      {selectedFile && (
+      {hasAttachments && (
         <span
           className="selected-file-dot"
-          title={`Imagen seleccionada: ${selectedFile.name}`}
-          aria-label={`Imagen seleccionada: ${selectedFile.name}`}
+          title="Hay archivos adjuntos"
+          aria-label="Hay archivos adjuntos"
         />
       )}
     </>
