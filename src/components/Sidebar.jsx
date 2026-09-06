@@ -103,6 +103,10 @@ export default function Sidebar({
     });
   };
 
+  const contextChat = chats.find(
+    (chat) => chat.id === contextMenu.chatId
+  );
+
   if (!isOpen) {
     return null;
   }
@@ -392,7 +396,9 @@ export default function Sidebar({
               strokeWidth={1.7}
             />
 
-            <span>Pin</span>
+            <span>
+              {contextChat?.isPinned ? 'Unpin' : 'Pin'}
+            </span>
           </button>
 
           <button

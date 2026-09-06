@@ -134,37 +134,45 @@ async function consumeSSEResponse(response, onEvent) {
   }
 }
 
+function toTimestamp(value) {
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp)
+    ? timestamp
+    : Date.now();
+}
+
+function mapBackendConversation(item) {
+  return {
+    id: item.conversation_id,
+    conversationId: item.conversation_id,
+    title: item.title || 'Nueva conversación',
+    timestamp: toTimestamp(item.updated_at),
+    isPinned: item.is_pinned ?? false,
+    messages: [],
+  };
+}
+
+function mapBackendMessages(messages, conversationId) {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+
+  return messages.map((message, index) => ({
+    id: `${conversationId}-${index}-${message.role}`,
+    type: message.role === 'user' ? 'user' : 'sapientia',
+    content: message.content || '',
+    graphData: null,
+    thinkingTime: 0,
+  }));
+}
+
 export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  const [chats, setChats] = useState([
-    {
-      id: '1',
-      conversationId: null,
-      title: 'Saludo IA',
-      timestamp: Date.now() - 5000000,
-      isPinned: false,
-      messages: [],
-    },
-    {
-      id: '2',
-      conversationId: null,
-      title: 'Calculadora científica Play Store',
-      timestamp: Date.now() - 20000000,
-      isPinned: false,
-      messages: [],
-    },
-    {
-      id: '3',
-      conversationId: null,
-      title: 'Plan app tutor IA',
-      timestamp: Date.now() - 40000000,
-      isPinned: true,
-      messages: [],
-    },
-  ]);
+  const [chats, setChats] = useState([]);
 
-  const [activeChatId, setActiveChatId] = useState('1');
+  const [activeChatId, setActiveChatId] = useState(null);
 
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -174,6 +182,11 @@ export default function App() {
   const [loading, setLoading] = useState(false);
 
   const [chatHistory, setChatHistory] = useState([]);
+
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const historyLoadSeq = useRef(0);
+  const selectSeq = useRef(0);
 
   const fileInputRef = useRef(null);
   const textareaRef = useRef(null);
@@ -210,39 +223,119 @@ export default function App() {
     });
   };
 
-  const handleRenameChat = (chatId, newTitle) => {
+  const handleRenameChat = async (chatId, newTitle) => {
     const title = newTitle?.trim();
 
     if (!title) {
       return;
     }
 
-    setChats((prev) =>
-      prev.map((chat) =>
-        chat.id === chatId
-          ? {
-              ...chat,
-              title,
-            }
-          : chat
-      )
-    );
+    const chat = chats.find((item) => item.id === chatId);
+
+    if (!chat) {
+      return;
+    }
+
+    if (!chat.conversationId || !user) {
+      setChats((prev) =>
+        prev.map((item) =>
+          item.id === chatId
+            ? { ...item, title }
+            : item
+        )
+      );
+      return;
+    }
+
+    try {
+      const idToken = await user.getIdToken();
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/v1/history/conversations/${chat.conversationId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ title }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Error HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      setChats((prev) =>
+        prev.map((item) =>
+          item.id === chatId
+            ? { ...item, title: data.title || title }
+            : item
+        )
+      );
+    } catch (error) {
+      console.error('Error al renombrar:', error);
+      alert('No se pudo renombrar la conversación.');
+    }
   };
 
-  const handlePinChat = (chatId) => {
-    setChats((prev) =>
-      prev.map((chat) =>
-        chat.id === chatId
-          ? {
-              ...chat,
-              isPinned: !chat.isPinned,
-            }
-          : chat
-      )
-    );
+  const handlePinChat = async (chatId) => {
+    const chat = chats.find((item) => item.id === chatId);
+
+    if (!chat) {
+      return;
+    }
+
+    const nextPinned = !chat.isPinned;
+
+    if (!chat.conversationId || !user) {
+      setChats((prev) =>
+        prev.map((item) =>
+          item.id === chatId
+            ? { ...item, isPinned: nextPinned }
+            : item
+        )
+      );
+      return;
+    }
+
+    try {
+      const idToken = await user.getIdToken();
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/v1/history/conversations/${chat.conversationId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ is_pinned: nextPinned }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Error HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      setChats((prev) =>
+        prev.map((item) =>
+          item.id === chatId
+            ? { ...item, isPinned: data.is_pinned ?? false }
+            : item
+        )
+      );
+    } catch (error) {
+      console.error('Error al fijar el chat:', error);
+      alert('No se pudo actualizar el chat.');
+    }
   };
 
-  const handleDeleteChat = (chatId) => {
+  const handleDeleteChat = async (chatId) => {
     if (
       !window.confirm(
         '¿Estás seguro de que quieres eliminar este chat?'
@@ -251,36 +344,169 @@ export default function App() {
       return;
     }
 
-    setChats((prev) => {
-      const remaining = prev.filter(
-        (chat) => chat.id !== chatId
-      );
+    const chat = chats.find((item) => item.id === chatId);
 
-      if (chatId === activeChatId) {
-        const nextChat = remaining[0] || null;
+    if (!chat) {
+      return;
+    }
 
-        setActiveChatId(nextChat?.id || null);
-        setChatHistory(nextChat?.messages || []);
+    if (chat.conversationId && user) {
+      try {
+        const idToken = await user.getIdToken();
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/v1/history/conversations/${chat.conversationId}`,
+          {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Bearer ${idToken}`,
+            },
+          }
+        );
+
+        if (response.status !== 204) {
+          throw new Error(`Error HTTP ${response.status}`);
+        }
+      } catch (error) {
+        console.error('Error al eliminar:', error);
+        alert('No se pudo eliminar la conversación.');
+        return;
       }
+    }
 
-      return remaining;
-    });
+    const remaining = chats.filter(
+      (item) => item.id !== chatId
+    );
+
+    setChats(remaining);
+
+    if (chatId === activeChatId) {
+      const nextChat = remaining[0] || null;
+
+      if (nextChat) {
+        handleSelectChat(nextChat.id);
+      } else {
+        setActiveChatId(null);
+        setChatHistory([]);
+      }
+    }
   };
 
-  const handleSelectChat = (chatId) => {
+  const handleSelectChat = async (chatId) => {
     const selectedChat = chats.find(
       (chat) => chat.id === chatId
     );
 
+    const seq = ++selectSeq.current;
+
     setActiveChatId(chatId);
-    setChatHistory(
-      selectedChat?.messages || []
-    );
     setMessage('');
+
+    if (!selectedChat?.conversationId || !user) {
+      setChatHistory(selectedChat?.messages || []);
+    } else {
+      setChatHistory([]);
+      setHistoryLoading(true);
+
+      try {
+        const idToken = await user.getIdToken();
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/v1/history/conversations/${selectedChat.conversationId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${idToken}`,
+              Accept: 'application/json',
+            },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Error HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (seq !== selectSeq.current) {
+          return;
+        }
+
+        const messages = mapBackendMessages(
+          data.messages,
+          selectedChat.conversationId
+        );
+
+        setChatHistory(messages);
+        setChats((prev) =>
+          prev.map((chat) =>
+            chat.id === chatId
+              ? { ...chat, messages }
+              : chat
+          )
+        );
+      } catch (error) {
+        if (seq === selectSeq.current) {
+          console.error(
+            'Error al cargar la conversación:',
+            error
+          );
+          setChatHistory([]);
+        }
+      } finally {
+        if (seq === selectSeq.current) {
+          setHistoryLoading(false);
+        }
+      }
+    }
 
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
     });
+  };
+
+  const loadHistory = async (currentUser) => {
+    const seq = ++historyLoadSeq.current;
+
+    setHistoryLoading(true);
+
+    try {
+      const idToken = await currentUser.getIdToken();
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/v1/history/conversations`,
+        {
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+            Accept: 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Error HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (seq !== historyLoadSeq.current) {
+        return;
+      }
+
+      setChats((data.items || []).map(mapBackendConversation));
+      setActiveChatId(null);
+      setChatHistory([]);
+    } catch (error) {
+      if (seq === historyLoadSeq.current) {
+        console.error('Error al cargar el historial:', error);
+        setChats([]);
+        setActiveChatId(null);
+        setChatHistory([]);
+      }
+    } finally {
+      if (seq === historyLoadSeq.current) {
+        setHistoryLoading(false);
+      }
+    }
   };
 
   useEffect(() => {
@@ -289,6 +515,16 @@ export default function App() {
       (currentUser) => {
         setUser(currentUser);
         setAuthLoading(false);
+
+        if (currentUser) {
+          loadHistory(currentUser);
+        } else {
+          historyLoadSeq.current += 1;
+          selectSeq.current += 1;
+          setChats([]);
+          setChatHistory([]);
+          setActiveChatId(null);
+        }
       }
     );
 
@@ -320,6 +556,7 @@ export default function App() {
       await signOut(auth);
       setChatHistory([]);
       setActiveChatId(null);
+      setChats([]);
     } catch (error) {
       console.error(
         'Error al cerrar sesión:',
@@ -1121,7 +1358,7 @@ export default function App() {
             onSend={sendRequest}
             onKeyDown={handleKeyDown}
             onInput={autoResize}
-            loading={loading}
+            loading={loading || historyLoading}
             image={image}
             fileInputRef={fileInputRef}
             onImageChange={
