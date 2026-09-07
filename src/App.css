@@ -885,6 +885,117 @@
   color: #d3cec4;
 }
 
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+
+  gap: 8px;
+
+  margin-bottom: 8px;
+}
+
+.message-attachment-card {
+  display: flex;
+  align-items: center;
+
+  gap: 8px;
+
+  max-width: 240px;
+
+  padding:
+    6px
+    8px;
+
+  border:
+    1px solid rgba(255, 255, 255, 0.06);
+
+  border-radius: 10px;
+
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.message-attachment-thumb-link {
+  flex-shrink: 0;
+
+  display: block;
+
+  line-height: 0;
+}
+
+.message-attachment-thumb {
+  display: block;
+
+  width: 48px;
+  height: 48px;
+
+  flex-shrink: 0;
+
+  border-radius: 7px;
+
+  object-fit: cover;
+
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.message-attachment-thumb.is-loading,
+.message-attachment-thumb.is-error {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  color: #9a978f;
+}
+
+.message-attachment-thumb.is-error {
+  color: #c98f8f;
+}
+
+.message-attachment-icon {
+  width: 48px;
+  height: 48px;
+
+  flex-shrink: 0;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 7px;
+
+  background: rgba(203, 199, 183, 0.08);
+
+  color: #cbc7b7;
+}
+
+.message-attachment-meta {
+  min-width: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  gap: 2px;
+}
+
+.message-attachment-name {
+  max-width: 160px;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  color: #ededed;
+
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.message-attachment-size {
+  color: #9a978f;
+
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 /* =========================================================
    BARRA DE ENTRADA
    ========================================================= */

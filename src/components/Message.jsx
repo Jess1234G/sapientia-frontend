@@ -8,11 +8,13 @@ import {
 import LatexRenderer from '../LatexRenderer';
 import ThinkingIndicator from './ThinkingIndicator';
 import Graph3D from './Graph3D';
+import MessageAttachments from './MessageAttachments';
 
 export default function Message({
   message,
   onCopy,
   onEdit,
+  onGetImageUrl,
 }) {
   const isUser = message.type === 'user';
   const isSapientia = message.type === 'sapientia';
@@ -40,7 +42,14 @@ export default function Message({
       >
         {isUser ? (
           <div className="user-bubble">
-            <LatexRenderer content={message.content} />
+            <MessageAttachments
+              attachments={message.attachments}
+              onGetImageUrl={onGetImageUrl}
+            />
+
+            {message.content && (
+              <LatexRenderer content={message.content} />
+            )}
           </div>
         ) : (
           <div className="assistant-text">
@@ -66,7 +75,7 @@ export default function Message({
           {isUser && (
             <button
               type="button"
-              onClick={() => onEdit(message.content)}
+              onClick={() => onEdit(message)}
               title="Editar"
               aria-label="Editar mensaje"
             >

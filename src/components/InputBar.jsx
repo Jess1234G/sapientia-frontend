@@ -13,6 +13,7 @@ export default function InputBar({
   loading,
   attachments,
   attachmentError,
+  editing,
   onRemoveAttachment,
   fileInputRef,
   onFilesChange,
@@ -31,6 +32,12 @@ export default function InputBar({
           onRemove={onRemoveAttachment}
           disabled={loading}
         />
+
+        {editing && (
+          <p className="attachment-error" role="status">
+            Recuperando archivos…
+          </p>
+        )}
 
         {attachmentError && (
           <p className="attachment-error" role="alert">

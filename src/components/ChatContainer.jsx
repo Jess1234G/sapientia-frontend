@@ -9,6 +9,7 @@ export default function ChatContainer({
   chatEndRef,
   onCopyMessage,
   onEditMessage,
+  onGetImageUrl,
 }) {
   return (
     <div className="chat-scroll-area flex-1 overflow-y-auto">
@@ -40,6 +41,7 @@ export default function ChatContainer({
             message={message}
             onCopy={onCopyMessage}
             onEdit={onEditMessage}
+            onGetImageUrl={onGetImageUrl}
           />
         ))}
 

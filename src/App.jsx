@@ -1,6 +1,6 @@
 // src/App.jsx
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import './App.css';
 
 import Sidebar from './components/Sidebar';
@@ -299,6 +299,20 @@ function mapBackendMessages(messages, conversationId) {
     content: message.content || '',
     graphData: null,
     thinkingTime: 0,
+    attachments: (message.attachments || []).map(
+      (attachment) => ({
+        attachmentId: attachment.attachment_id,
+        filename: attachment.filename,
+        contentType: attachment.content_type,
+        size: attachment.size,
+        kind: (attachment.content_type || '').startsWith(
+          'image/'
+        )
+          ? 'image'
+          : 'document',
+        previewUrl: null,
+      })
+    ),
   }));
 }
 
@@ -316,6 +330,7 @@ export default function App() {
   const [attachments, setAttachments] = useState([]);
   const [attachmentError, setAttachmentError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const [chatHistory, setChatHistory] = useState([]);
 
@@ -328,6 +343,146 @@ export default function App() {
   const textareaRef = useRef(null);
   const chatEndRef = useRef(null);
   const attachmentsRef = useRef([]);
+  const messageUrlsRef = useRef([]);
+
+  const clearMessageUrls = () => {
+    messageUrlsRef.current.forEach((url) => {
+      if (url) {
+        URL.revokeObjectURL(url);
+      }
+    });
+
+    messageUrlsRef.current = [];
+  };
+
+  const getAttachmentUrl = useCallback(
+    async (attachmentId) => {
+      if (!user) {
+        return null;
+      }
+
+      try {
+        const idToken = await user.getIdToken();
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/v1/attachments/${attachmentId}/url`,
+          {
+            headers: {
+              Authorization: `Bearer ${idToken}`,
+            },
+          }
+        );
+
+        if (!response.ok) {
+          return null;
+        }
+
+        const data = await response.json();
+
+        return data.url || null;
+      } catch {
+        return null;
+      }
+    },
+    [user]
+  );
+
+  const buildMessageAttachments = (
+    selected,
+    uploadedIds
+  ) =>
+    selected.map((item, index) => {
+      const isImage = item.kind === 'image';
+      const previewUrl = isImage
+        ? URL.createObjectURL(item.file)
+        : null;
+
+      if (previewUrl) {
+        messageUrlsRef.current.push(previewUrl);
+      }
+
+      return {
+        attachmentId: uploadedIds[index],
+        filename: item.file.name,
+        contentType: item.file.type || '',
+        size: item.file.size,
+        kind: item.kind,
+        previewUrl,
+      };
+    });
+
+  const clearComposerAttachments = () => {
+    attachmentsRef.current.forEach((item) => {
+      if (item.previewUrl) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+    });
+
+    setAttachments([]);
+  };
+
+  const fetchFileFromAttachment = async (attachment) => {
+    if (!user) {
+      throw new Error('Sin sesión.');
+    }
+
+    const idToken = await user.getIdToken();
+
+    const urlResponse = await fetch(
+      `${API_BASE_URL}/api/v1/attachments/${attachment.attachmentId}/url`,
+      {
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+        },
+      }
+    );
+
+    if (!urlResponse.ok) {
+      throw new Error(`HTTP ${urlResponse.status}`);
+    }
+
+    const data = await urlResponse.json();
+    const url = data.url;
+
+    if (!url) {
+      throw new Error('Sin URL de descarga.');
+    }
+
+    const blobResponse = await fetch(url);
+
+    if (!blobResponse.ok) {
+      throw new Error(`HTTP ${blobResponse.status}`);
+    }
+
+    const blob = await blobResponse.blob();
+
+    return new File([blob], attachment.filename, {
+      type: attachment.contentType || 'application/octet-stream',
+    });
+  };
+
+  const focusTextarea = () => {
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+
+      const length =
+        textareaRef.current?.value.length || 0;
+
+      textareaRef.current?.setSelectionRange(
+        length,
+        length
+      );
+
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height =
+          `${Math.min(
+            textareaRef.current.scrollHeight,
+            170
+          )}px`;
+      }
+    });
+  };
 
   const activeChat = useMemo(
     () =>
@@ -352,6 +507,7 @@ export default function App() {
 
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
+    clearMessageUrls();
     setChatHistory([]);
     setMessage('');
 
@@ -536,6 +692,8 @@ export default function App() {
 
     const seq = ++selectSeq.current;
 
+    clearMessageUrls();
+
     setActiveChatId(chatId);
     setMessage('');
 
@@ -680,6 +838,8 @@ export default function App() {
 
   useEffect(() => {
     return () => {
+      clearMessageUrls();
+
       attachmentsRef.current.forEach((item) => {
         if (item.previewUrl) {
           URL.revokeObjectURL(item.previewUrl);
@@ -705,6 +865,7 @@ export default function App() {
   const logout = async () => {
     try {
       await signOut(auth);
+      clearMessageUrls();
       setChatHistory([]);
       setActiveChatId(null);
       setChats([]);
@@ -984,7 +1145,13 @@ export default function App() {
 
       uploadsDone = true;
 
-      // 2) Limpiar el compositor tras una subida exitosa.
+      // 2) Construir la metadata de attachments del mensaje.
+      userMessage.attachments = buildMessageAttachments(
+        selectedAttachments,
+        uploadedAttachmentIds
+      );
+
+      // 3) Limpiar el compositor (revoca solo URLs del compositor).
       resetInput();
       setAttachmentError('');
 
@@ -1052,7 +1219,7 @@ export default function App() {
           .join('\n\n');
       }
 
-      // 3) Añadir el mensaje del usuario al chat (tras subida + visión).
+      // 4) Añadir el mensaje del usuario al chat (tras subida + visión).
       setChatHistory(nextMessages);
 
       setChats((prev) =>
@@ -1488,37 +1655,80 @@ export default function App() {
       )}px`;
   };
 
-  const editUserMessage = (content) => {
-    if (
-      !content ||
-      content === '(imagen adjunta)' ||
-      content === '(archivo adjunto)'
-    ) {
+  const editUserMessage = async (message) => {
+    if (!message) {
       return;
     }
 
-    setMessage(content);
+    const content = message.content || '';
+    const historicalAttachments = message.attachments || [];
 
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
+    const isPlaceholder =
+      content === '(imagen adjunta)' ||
+      content === '(archivo adjunto)';
 
-      textareaRef.current?.setSelectionRange(
-        content.length,
-        content.length
-      );
+    setEditing(true);
+    setAttachmentError('');
 
-      if (textareaRef.current) {
-        textareaRef.current.style.height =
-          'auto';
+    // 1) Limpiar adjuntos actuales del compositor (revocar URLs).
+    clearComposerAttachments();
 
-        textareaRef.current.style.height =
-          `${Math.min(
-            textareaRef.current
-              .scrollHeight,
-            170
-          )}px`;
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+
+    // 2) Recuperar el texto.
+    setMessage(isPlaceholder ? '' : content);
+
+    // 3) Reconstruir los adjuntos históricos.
+    if (historicalAttachments.length === 0) {
+      setEditing(false);
+      focusTextarea();
+      return;
+    }
+
+    const reconstructed = [];
+    const failed = [];
+
+    for (const attachment of historicalAttachments) {
+      try {
+        const file = await fetchFileFromAttachment(
+          attachment
+        );
+        const isImage = attachment.kind === 'image';
+
+        reconstructed.push({
+          id: `${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2, 9)}`,
+          file,
+          previewUrl: isImage
+            ? URL.createObjectURL(file)
+            : null,
+          kind: attachment.kind,
+        });
+      } catch (error) {
+        console.error(
+          'No se pudo recuperar el adjunto:',
+          attachment.filename,
+          error
+        );
+        failed.push(attachment.filename);
       }
-    });
+    }
+
+    if (reconstructed.length > 0) {
+      setAttachments(reconstructed);
+    }
+
+    if (failed.length > 0) {
+      setAttachmentError(
+        `No se pudo recuperar: ${failed.join(', ')}.`
+      );
+    }
+
+    setEditing(false);
+    focusTextarea();
   };
 
   const copyMessage = async (content) => {
@@ -1634,6 +1844,7 @@ export default function App() {
             chatEndRef={chatEndRef}
             onCopyMessage={copyMessage}
             onEditMessage={editUserMessage}
+            onGetImageUrl={getAttachmentUrl}
           />
 
           <InputBar
@@ -1642,9 +1853,10 @@ export default function App() {
             onSend={sendRequest}
             onKeyDown={handleKeyDown}
             onInput={autoResize}
-            loading={loading || historyLoading}
+            loading={loading || historyLoading || editing}
             attachments={attachments}
             attachmentError={attachmentError}
+            editing={editing}
             onRemoveAttachment={removeAttachment}
             fileInputRef={fileInputRef}
             onFilesChange={handleFilesChange}
