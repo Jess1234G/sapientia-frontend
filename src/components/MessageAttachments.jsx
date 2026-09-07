@@ -20,6 +20,20 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatType(contentType) {
+  const normalized = (contentType || '').toLowerCase();
+
+  if (normalized === 'application/pdf') {
+    return 'PDF';
+  }
+
+  if (normalized === 'text/plain') {
+    return 'TXT';
+  }
+
+  return '';
+}
+
 function ImageThumbnail({ attachment, onGetImageUrl }) {
   const [url, setUrl] = useState(
     attachment.previewUrl || null
@@ -128,42 +142,60 @@ export default function MessageAttachments({
       role="list"
       aria-label="Archivos adjuntos al mensaje"
     >
-      {attachments.map((attachment) => (
-        <div
-          key={attachment.attachmentId}
-          className="message-attachment-card"
-          role="listitem"
-        >
-          {attachment.kind === 'image' ? (
-            <ImageThumbnail
-              attachment={attachment}
-              onGetImageUrl={onGetImageUrl}
-            />
-          ) : (
-            <span
-              className="message-attachment-icon"
-              aria-hidden="true"
-            >
-              <FiFileText size={18} strokeWidth={1.6} />
-            </span>
-          )}
+      {attachments.map((attachment) => {
+        const isDocument = attachment.kind === 'document';
+        const type = isDocument
+          ? formatType(attachment.contentType)
+          : '';
+        const size = formatSize(attachment.size);
 
-          <div className="message-attachment-meta">
-            <span
-              className="message-attachment-name"
-              title={attachment.filename}
-            >
-              {attachment.filename}
-            </span>
-
-            {formatSize(attachment.size) && (
-              <span className="message-attachment-size">
-                {formatSize(attachment.size)}
+        return (
+          <div
+            key={attachment.attachmentId}
+            className="message-attachment"
+            role="listitem"
+          >
+            {attachment.kind === 'image' ? (
+              <ImageThumbnail
+                attachment={attachment}
+                onGetImageUrl={onGetImageUrl}
+              />
+            ) : (
+              <span
+                className="message-attachment-icon"
+                aria-hidden="true"
+              >
+                <FiFileText size={20} strokeWidth={1.6} />
               </span>
             )}
+
+            <div className="message-attachment-meta">
+              <span
+                className="message-attachment-name"
+                title={attachment.filename}
+              >
+                {attachment.filename}
+              </span>
+
+              {(type || size) && (
+                <span className="message-attachment-detail">
+                  {type && (
+                    <span className="message-attachment-type">
+                      {type}
+                    </span>
+                  )}
+
+                  {type && size && (
+                    <span aria-hidden="true">·</span>
+                  )}
+
+                  {size && <span>{size}</span>}
+                </span>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

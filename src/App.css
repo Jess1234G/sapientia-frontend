@@ -891,27 +891,43 @@
 
   gap: 8px;
 
-  margin-bottom: 8px;
+  max-width: 100%;
+
+  margin-bottom: 10px;
 }
 
-.message-attachment-card {
+.message-attachment {
   display: flex;
   align-items: center;
 
-  gap: 8px;
+  gap: 9px;
 
-  max-width: 240px;
+  min-width: 0;
+
+  max-width: 232px;
 
   padding:
-    6px
-    8px;
+    5px
+    9px
+    5px
+    5px;
 
   border:
-    1px solid rgba(255, 255, 255, 0.06);
+    1px solid rgba(255, 255, 255, 0.055);
 
   border-radius: 10px;
 
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.028);
+
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.message-attachment:hover {
+  background: rgba(255, 255, 255, 0.05);
+
+  border-color: rgba(255, 255, 255, 0.09);
 }
 
 .message-attachment-thumb-link {
@@ -920,17 +936,21 @@
   display: block;
 
   line-height: 0;
+
+  border-radius: 8px;
+
+  overflow: hidden;
 }
 
 .message-attachment-thumb {
   display: block;
 
-  width: 48px;
-  height: 48px;
+  width: 64px;
+  height: 64px;
 
   flex-shrink: 0;
 
-  border-radius: 7px;
+  border-radius: 8px;
 
   object-fit: cover;
 
@@ -943,11 +963,20 @@
   align-items: center;
   justify-content: center;
 
+  width: 64px;
+  height: 64px;
+
   color: #9a978f;
+}
+
+.message-attachment-thumb.is-loading {
+  animation: attachment-pulse 1.4s ease-in-out infinite;
 }
 
 .message-attachment-thumb.is-error {
   color: #c98f8f;
+
+  background: rgba(201, 143, 143, 0.06);
 }
 
 .message-attachment-icon {
@@ -960,7 +989,7 @@
   align-items: center;
   justify-content: center;
 
-  border-radius: 7px;
+  border-radius: 8px;
 
   background: rgba(203, 199, 183, 0.08);
 
@@ -977,7 +1006,7 @@
 }
 
 .message-attachment-name {
-  max-width: 160px;
+  max-width: 150px;
 
   overflow: hidden;
   text-overflow: ellipsis;
@@ -986,14 +1015,43 @@
   color: #ededed;
 
   font-size: 12px;
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
-.message-attachment-size {
+.message-attachment-detail {
+  display: flex;
+  align-items: center;
+
+  gap: 5px;
+
   color: #9a978f;
 
   font-size: 11px;
   line-height: 1.2;
+
+  white-space: nowrap;
+}
+
+.message-attachment-type {
+  color: #9a978f;
+
+  font-size: 10px;
+  font-weight: 500;
+
+  letter-spacing: 0.04em;
+
+  text-transform: uppercase;
+}
+
+@keyframes attachment-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
 }
 
 /* =========================================================
